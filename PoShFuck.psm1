@@ -1,4 +1,4 @@
-﻿Function Invoke-TheFuck {
+Function Invoke-TheFuck {
 <#
 	.SYNOPSIS
 	Powershell Implementation of 'thefuck' https://github.com/nvbn/thefuck
@@ -378,8 +378,83 @@ Function IsExtParameterFucked {
 	return $false
 }
 
-Export-ModuleMember *-*
-Export-ModuleMember fuck!
+function Get-FuckingCommand {
+<#
+	.SYNOPSIS
+		Uses AI to generate a PowerShell command from natural language.
+	.DESCRIPTION
+		Queries the Kilo AI API to generate PowerShell commands based on a natural language prompt.
+	.EXAMPLE
+		Get-FuckingCommand "list all processes and their ports"
+#>
+	[CmdletBinding()]
+	param(
+		[Parameter(Mandatory=$true, ValueFromPipeline=$true, ValueFromPipelineByPropertyName=$true)]
+		[string]$Prompt
+	)
 
-Set-Alias -Scope global -Name "Fuck" -Value "Invoke-TheFuck"
-Set-Alias -Scope global -Name "WTF" -Value "Get-FuckingHelp"
+	if ( -not $env:KILO_API_KEY ) {
+		Write-Warning "KILO_API_KEY environment variable not set. Set `$env:KILO_API_KEY to use Get-FuckingCommand."
+		return
+	}
+
+	$systemPrompt = @"
+You are a PowerShell expert on Windows. The user wants to accomplish a task.
+Return ONLY the exact PowerShell command(s) or script to execute.
+No explanations, no markdown formatting, no code blocks - just raw command(s).
+If multiple commands needed, separate with semicolons or newlines.
+"@
+
+	try {
+		$body = @{
+			model = "kilo-auto/free"
+			messages = @(
+				@{ role = "system"; content = $systemPrompt }
+				@{ role = "user"; content = $Prompt }
+			)
+			stream = $false
+		} | ConvertTo-Json -Depth 3
+
+		$response = Invoke-RestMethod -Uri "https://api.kilo.ai/api/gateway/chat/completions" `
+			-Method POST `
+			-Headers @{
+				"Authorization" = "Bearer $env:KILO_API_KEY"
+				"Content-Type" = "application/json"
+			} `
+			-Body $body `
+			-ErrorAction Stop
+
+		$command = $response.choices.message.content.Trim()
+
+		if ( $command ) {
+			Write-Host "`nGenerated command:" -ForegroundColor Cyan
+			Write-Host $command -ForegroundColor Yellow
+			Write-Host ""
+
+			try {
+				$title = "Execute this command?"
+				$message = $command
+				$yes = New-Object System.Management.Automation.Host.ChoiceDescription "&Yes",'Execute'
+				$no = New-Object System.Management.Automation.Host.ChoiceDescription "&No",'Exit'
+				$options = [System.Management.Automation.Host.ChoiceDescription[]]($yes, $no)
+				$answer = $host.ui.PromptForChoice($title, $message, $options, 0)
+
+				if ( $answer -eq 0 ) {
+					Invoke-Expression $command
+				}
+			} catch {
+				Write-Host "Run this command yourself: $command" -ForegroundColor Gray
+			}
+		} else {
+			Write-Warning "No command returned from AI."
+		}
+	} catch {
+		Write-Warning "Failed to get command from AI: $($_.Exception.Message)"
+	}
+}
+
+Set-Alias -Scope global -Name "gfc" -Value "Get-FuckingCommand"
+
+Export-ModuleMember *-*
+Export-ModuleMember Get-FuckingCommand
+Export-ModuleMember fuck!
